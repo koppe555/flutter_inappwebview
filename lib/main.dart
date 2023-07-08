@@ -1,115 +1,155 @@
-import 'package:flutter/material.dart';
+import 'dart:async';  // 非同期操作を行うためのパッケージをインポート
+import 'package:flutter/foundation.dart';  // Flutterアプリの動作環境に関する情報を提供するパッケージをインポート
+import 'package:flutter/material.dart';  // FlutterのUIコンポーネントを提供するパッケージをインポート
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';  // WebViewを表示するためのパッケージをインポート
+import 'package:url_launcher/url_launcher.dart';  // URLを開くためのパッケージをインポート
 
-void main() {
-  runApp(const MyApp());
+Future main() async {
+  WidgetsFlutterBinding.ensureInitialized();  // Flutterアプリの初期化を確認
+
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    await AndroidInAppWebViewController.setWebContentsDebuggingEnabled(true);  // AndroidのWebViewでデバッグモードを有効にする
+  }
+
+  runApp(const MaterialApp(home: MyApp()));  // アプリを実行
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        primarySwatch: Colors.blue,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
-  }
+  MyAppState createState() => MyAppState();
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+class MyAppState extends State<MyApp> {
+  final GlobalKey webViewKey = GlobalKey();  // WebViewのキーを作成
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
+  InAppWebViewController? webViewController;  // WebViewのコントローラを定義
 
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  PullToRefreshController? pullToRefreshController;  // プルダウン更新のコントローラを定義
+  String url = "";  // 現在のURLを保持する変数を定義
+  double progress = 0;  // ページの読み込み進捗を保持する変数を定義
+  final urlController = TextEditingController();  // URL入力用のテキストコントローラを定義
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  void initState() {
+    super.initState();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+        appBar: AppBar(title: const Text("InAppWebView")),  // アプリバーを作成
+        body: SafeArea(
+            child: Column(children: <Widget>[
+          TextField(
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.search)),  // 検索用のテキストフィールドを作成
+            controller: urlController,
+            keyboardType: TextInputType.url,
+            onSubmitted: (value) {
+              var url = Uri.parse(value);  // 入力された値をURLとしてパースする
+              if (url.scheme.isEmpty) {
+                url = Uri.parse("https://www.google.com/search?q=$value");  // URLにスキームがない場合、Google検索のURLを生成する
+              }
+              webViewController?.loadUrl(urlRequest: URLRequest(url: url));  // WebViewでURLをロードする
+            },
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                InAppWebView(
+                  key: webViewKey,  // WebViewを作成し、キーを設定する
+                  initialUrlRequest:
+                      URLRequest(url: Uri.parse("https://www.digital.go.jp/")),  // 初期表示するURLを指定する
+                  pullToRefreshController: pullToRefreshController,  // プルダウン更新のコントローラを設定する
+                  onWebViewCreated: (controller) {
+                    webViewController = controller;  // WebViewが作成されたときにコントローラを取得する
+                  },
+                  onLoadStart: (controller, url) {
+                    setState(() {
+                      this.url = url.toString();  // ページの読み込みが開始されたときにURLを更新する
+                      urlController.text = this.url;
+                    });
+                  },
+                  shouldOverrideUrlLoading:
+                      (controller, navigationAction) async {
+                    var uri = navigationAction.request.url!;
+
+                    if (![
+                      "http",
+                      "https",
+                      "file",
+                      "chrome",
+                      "data",
+                      "javascript",
+                      "about"
+                    ].contains(uri.scheme)) {
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(
+                          uri,
+                        );  // アプリを起動する
+                        return NavigationActionPolicy.CANCEL;  // リクエストをキャンセルする
+                      }
+                    }
+
+                    return NavigationActionPolicy.ALLOW;  // ナビゲーションを許可する
+                  },
+                  onLoadStop: (controller, url) async {
+                    pullToRefreshController?.endRefreshing();
+                    setState(() {
+                      this.url = url.toString();  // ページの読み込みが停止したときにURLを更新する
+                      urlController.text = this.url;
+                    });
+                  },
+                  onProgressChanged: (controller, progress) {
+                    if (progress == 100) {
+                      pullToRefreshController?.endRefreshing();
+                    }
+                    setState(() {
+                      this.progress = progress / 100;  // ページの読み込みの進捗を更新する
+                      urlController.text = url;
+                    });
+                  },
+                  onUpdateVisitedHistory: (controller, url, androidIsReload) {
+                    setState(() {
+                      this.url = url.toString();  // ページの履歴が更新されたときにURLを更新する
+                      urlController.text = this.url;
+                    });
+                  },
+                  onConsoleMessage: (controller, consoleMessage) {
+                    debugPrint(consoleMessage.toString());  // コンソールメッセージをデバッグ出力する
+                  },
+                ),
+                progress < 1.0
+                    ? LinearProgressIndicator(value: progress)  // ページの読み込み進捗を表示する
+                    : Container(),
+              ],
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
-    );
+          ),
+          ButtonBar(
+            alignment: MainAxisAlignment.center,
+            children: <Widget>[
+              ElevatedButton(
+                child: const Icon(Icons.arrow_back),  // 戻るボタンを作成
+                onPressed: () {
+                  webViewController?.goBack();  // WebViewで前のページに戻る
+                },
+              ),
+              ElevatedButton(
+                child: const Icon(Icons.arrow_forward),  // 進むボタンを作成
+                onPressed: () {
+                  webViewController?.goForward();  // WebViewで次のページに進む
+                },
+              ),
+              ElevatedButton(
+                child: const Icon(Icons.refresh),  // リフレッシュボタンを作成
+                onPressed: () {
+                  webViewController?.reload(); 
+webViewController?.reload();  // WebViewをリロードする
+                },
+              ),
+            ],
+          ),
+        ])));
   }
 }
